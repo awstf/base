@@ -1,3 +1,3 @@
 # base
 
-Provides stuff for basic setup AWS account
+Provides stuff for basic AWS account setup.

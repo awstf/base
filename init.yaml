@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  StateBucketName:
+    Type: String
+    AllowedPattern: "^([a-z0-9][a-z0-9-]{3,63})$"
+    Description: "Terraform state bucket name. Should be globally unique."
+  TrailBucketName:
+    Type: String
+    AllowedPattern: "^([a-z0-9][a-z0-9-]{3,63})$"
+    Description: "Terraform state bucket name. Should be globally unique."
+Resources:
+# ---------------------- Terraform state bucket ------------------------------
+  StateBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref StateBucketName
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+# ---------------------- CloudTrail ------------------------------------------
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref TrailBucketName
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      LifecycleConfiguration:
+        Rules:
+        - Status: Enabled
+          Transitions:
+          - StorageClass: GLACIER
+            TransitionInDays: 30
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: !Ref TrailBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Action:
+          - "s3:GetBucketAcl"
+          Principal:
+            Service:
+            - "cloudtrail.amazonaws.com"
+          Resource:
+          - !Sub "arn:aws:s3:::${TrailBucketName}"
+        - Effect: Allow
+          Action:
+          - "s3:PutObject"
+          Principal:
+            Service:
+            - "cloudtrail.amazonaws.com"
+          Resource:
+          - !Sub "arn:aws:s3:::${TrailBucketName}/*"
+          Condition:
+            StringEquals:
+              s3:x-amz-acl:
+              - "bucket-owner-full-control"
+  TrailLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: "/aws/cloudtrail"
+      RetentionInDays: 365
+  TrailRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cloudtrail
+      Description: Allow CloudTrail log delivery to CloudWatch
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Action:
+          - "sts:AssumeRole"
+          Principal:
+            Service: !Sub "cloudtrail.amazonaws.com"
+      Policies:
+      - PolicyName: cloudtrail-cloudwatch
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - "logs:CreateLogStream"
+            - "logs:PutLogEvents"
+            Resource:
+            - !GetAtt TrailLogGroup.Arn
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      TrailName: global
+      CloudWatchLogsLogGroupArn: !GetAtt TrailLogGroup.Arn
+      CloudWatchLogsRoleArn: !GetAtt TrailRole.Arn
+      S3BucketName: !Ref TrailBucketName
+      IsLogging: True
+      EnableLogFileValidation: True
+      IncludeGlobalServiceEvents: True
+      IsMultiRegionTrail: True
+# ---------------------- IAM management permissions --------------------------
+  SuperUsersPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SuperUsers
+      Roles:
+      - !Ref SuperUsersRole
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Action:
+          - "iam:ListGroups"
+          - "iam:ListUsers"
+          - "iam:ListRoles"
+          - "iam:ListPolicies"
+          Resource: "*"
+        - Effect: Allow
+          Action:
+          - "iam:AddUserToGroup"
+          - "iam:AttachGroupPolicy"
+          - "iam:CreateGroup"
+          - "iam:DeleteGroup"
+          - "iam:DeleteGroupPolicy"
+          - "iam:DetachGroupPolicy"
+          - "iam:GetGroup"
+          - "iam:PutGroupPolicy"
+          - "iam:GetGroupPolicy"
+          - "iam:ListAttachedGroupPolicies"
+          - "iam:ListGroupPolicies"
+          - "iam:UpdateGroup"
+          Resource:
+          - !Sub "arn:aws:iam::${AWS::AccountId}:group/*"
+        - Effect: Allow
+          Action:
+          - "iam:DeleteUser"
+          - "iam:DeleteUserPolicy"
+          - "iam:DetachUserPolicy"
+          - "iam:GetUser"
+          - "iam:GetUserPolicy"
+          - "iam:ListAttachedUserPolicies"
+          - "iam:ListGroupsForUser"
+          - "iam:ListUserPolicies"
+          - "iam:ListUserTags"
+          - "iam:RemoveUserFromGroup"
+          - "iam:UpdateUser"
+          Resource:
+          - !Sub "arn:aws:iam::${AWS::AccountId}:user/*"
+        - Effect: Allow
+          Action:
+          - "iam:AttachRolePolicy"
+          - "iam:CreateRole"
+          - "iam:DeleteRole"
+          - "iam:DetachRolePolicy"
+          - "iam:DeleteRolePolicy"
+          - "iam:GetRole"
+          - "iam:GetRolePolicy"
+          - "iam:ListAttachedRolePolicies"
+          - "iam:ListInstanceProfilesForRole"
+          - "iam:ListRolePolicies"
+          - "iam:ListRoleTags"
+          - "iam:PutRolePolicy"
+          - "iam:TagRole"
+          - "iam:UntagRole"
+          - "iam:UpdateAssumeRolePolicy"
+          - "iam:UpdateRole"
+          Resource:
+          - !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
+        - Effect: Allow
+          Action:
+          - "iam:CreatePolicy"
+          - "iam:CreatePolicyVersion"
+          - "iam:DeletePolicy"
+          - "iam:DeletePolicyVersion"
+          - "iam:GetPolicy"
+          - "iam:GetPolicyVersion"
+          - "iam:ListEntitiesForPolicy"
+          - "iam:ListPolicyVersions"
+          - "iam:SetDefaultPolicyVersion"
+          Resource:
+          - !Sub "arn:aws:iam::${AWS::AccountId}:policy/*"
+  SuperUsersRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SuperUsers
+      Description: Provides access for account IAM management
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Action:
+          - "sts:AssumeRole"
+          Principal:
+            AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+  SuperUsersGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: SuperUsers
+      Policies:
+      - PolicyName: AssumeSuperUsers
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - "sts:AssumeRole"
+            Resource:
+            - !GetAtt SuperUsersRole.Arn
