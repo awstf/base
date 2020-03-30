@@ -108,6 +108,7 @@ Resources:
     DependsOn:
     - TrailBucket
     - TrailLogGroup
+    - TrailBucketPolicy
     Properties:
       TrailName: global
       CloudWatchLogsLogGroupArn: !GetAtt TrailLogGroup.Arn
